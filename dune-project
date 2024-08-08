@@ -1,26 +1,23 @@
 (lang dune 3.16)
 
-(name simulation_ocaml)
+(name simulation)
 
-(generate_opam_files true)
+(generate_opam_files false)
 
 (source
- (github username/reponame))
+ (github krios2146/simulation_ocaml))
 
-(authors "Author Name")
+(authors "Vladimir Kidyaev")
 
-(maintainers "Maintainer Name")
+(maintainers "Vladimir Kidyaev")
 
-(license LICENSE)
+(license MIT)
 
-(documentation https://url/to/documentation)
+(documentation https://github.com/krios2146/simulation_ocaml)
 
 (package
- (name simulation_ocaml)
- (synopsis "A short synopsis")
- (description "A longer description")
- (depends ocaml dune)
- (tags
-  (topics "to describe" your project)))
+ (name simulation)
+ (synopsis "Project is a step-by-step simulation of a 2D world populated by herbivores and predators with console UI")
+ (depends ocaml dune))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html
