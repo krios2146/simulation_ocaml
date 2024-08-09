@@ -1,4 +1,4 @@
 (executable
- (public_name simulation_ocaml)
+ (public_name simulation)
  (name main)
- (libraries simulation_ocaml))
+ (libraries simulation))
