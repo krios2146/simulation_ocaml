@@ -12,9 +12,9 @@ end)
 
 (* ensuring only entity is allowed to be values in the map *)
 type coordinates_entity_map = entity CoordinatesMap.t
-type simulation = { map : coordinates_entity_map; max_x : int; max_y : int }
+type simulation_map = { map : coordinates_entity_map; max_x : int; max_y : int }
 
-let find_entity_by_coordinates coordinates_entity_map coordinates =
+let find coordinates_entity_map coordinates =
   CoordinatesMap.find_opt coordinates coordinates_entity_map
 
 let get_entity_sprite entity =
@@ -27,25 +27,28 @@ let get_entity_sprite entity =
 
 let empty_sprite = "  "
 
-let rec render simulation coordinates (to_render : string) =
+let rec render_from_with simulation coordinates (to_render : string) =
   match (coordinates.y, simulation.max_y) with
   | y, max_y when y >= max_y -> print_string to_render
   | _ -> (
       match (coordinates.x, simulation.max_x) with
       | x, max_x when x >= max_x ->
-          render simulation { x = 0; y = coordinates.y + 1 } (to_render ^ "\n")
+          render_from_with simulation
+            { x = 0; y = coordinates.y + 1 }
+            (to_render ^ "\n")
       | _ ->
-          let entity = find_entity_by_coordinates simulation.map coordinates in
+          let entity = find simulation.map coordinates in
           let sprite =
             match entity with
             | Some entity -> get_entity_sprite entity
             | None -> empty_sprite
           in
           let to_render = to_render ^ sprite in
-          render simulation { coordinates with x = coordinates.x + 1 } to_render
-      )
+          render_from_with simulation
+            { coordinates with x = coordinates.x + 1 }
+            to_render)
 
-let render_from_start simulation = render simulation { x = 0; y = 0 } ""
+let render simulation = render_from_with simulation { x = 0; y = 0 } ""
 
 let gen_random_coordinates (max_x : int) (max_y : int) =
   let x = Random.int max_x in
@@ -72,7 +75,7 @@ let rec place coordinates_entity_map (entities : entity list) max_x max_y =
 
 let percent value area = area * value / 100
 
-let create_simluation ~(map_height : int) ~(map_width : int)
+let create_simluation_map ~(map_height : int) ~(map_width : int)
     ~(density : density) =
   let place coordinates_entity_map entities =
     place coordinates_entity_map entities map_width map_height
@@ -104,3 +107,110 @@ let create_simluation ~(map_height : int) ~(map_width : int)
         place map (generate (percent 2) (Creature Herbivore))
   in
   { map; max_x = map_width; max_y = map_height }
+
+let exists coordinates_entity_map entity =
+  CoordinatesMap.exists (fun _ e -> e = entity) coordinates_entity_map
+
+let find_all coordinates_entity_map entity =
+  CoordinatesMap.filter (fun _ e -> e = entity) coordinates_entity_map
+  |> CoordinatesMap.to_seq |> List.of_seq
+
+let is_over simulation =
+  (not (exists simulation.map Grass))
+  && not (exists simulation.map (Creature Herbivore))
+
+module CoordinatesSet = Set.Make (struct
+  type t = coordinates
+
+  let compare (this : t) (that : t) =
+    match compare this.x that.x with 0 -> compare this.y that.y | n -> n
+end)
+
+let is_valid coordinates max_x max_y =
+  if coordinates.x >= max_x then false
+  else if coordinates.y >= max_y then false
+  else true
+
+let rec reconstruct_path_rec predecessors origin path =
+  match CoordinatesMap.find_opt origin predecessors with
+  | Some parent ->
+      let path = parent :: path in
+      let origin = parent in
+      reconstruct_path_rec predecessors origin path
+  | None -> (
+      match path with
+      | _ :: t -> if List.length t >= 1 then t else path
+      | [] -> [])
+
+let reconstruct_path predecessors origin =
+  reconstruct_path_rec predecessors origin [ origin ]
+
+let find_neighbours simulation_map coordinates =
+  let neighbours =
+    [
+      { x = coordinates.x - 1; y = coordinates.y - 1 };
+      { x = coordinates.x; y = coordinates.y - 1 };
+      { x = coordinates.x + 1; y = coordinates.y - 1 };
+      { x = coordinates.x - 1; y = coordinates.y };
+      { x = coordinates.x + 1; y = coordinates.y };
+      { x = coordinates.x - 1; y = coordinates.y + 1 };
+      { x = coordinates.x; y = coordinates.y + 1 };
+      { x = coordinates.x + 1; y = coordinates.y + 1 };
+    ]
+  in
+  let is_valid = function
+    | coordinates ->
+        is_valid coordinates simulation_map.max_x simulation_map.max_y
+  in
+  List.filter is_valid neighbours
+
+let is_visited coordinates visited = CoordinatesSet.mem coordinates visited
+
+let rec find_path_bfs simulation_map q visited predecessors target =
+  let not_visited c = not (is_visited c visited) in
+  try
+    let current_coordinates = Queue.take q in
+    let to_predecessor c = (c, current_coordinates) in
+    let current_entity = find simulation_map.map current_coordinates in
+    match current_entity with
+    | target when target = current_entity ->
+        reconstruct_path predecessors current_coordinates
+    | _ ->
+        let neighbours = find_neighbours simulation_map current_coordinates in
+        let neighbours = List.filter not_visited neighbours in
+        let neighbours_seq = List.to_seq neighbours in
+        let predecessors =
+          CoordinatesMap.add_seq
+            (List.map to_predecessor neighbours |> List.to_seq)
+            predecessors
+        in
+        let visited = CoordinatesSet.add_seq neighbours_seq visited in
+        Queue.add_seq q neighbours_seq;
+        find_path_bfs simulation_map q visited predecessors target
+  with Queue.Empty -> []
+
+let find_path simulation_map coordinates entity =
+  let q = Queue.create () in
+  let visited = CoordinatesSet.empty in
+  let predecessors = CoordinatesMap.empty in
+
+  Queue.add coordinates q;
+  let visited = CoordinatesSet.add coordinates visited in
+
+  find_path_bfs simulation_map q visited predecessors entity
+
+let iterate simulation_map =
+  (* let herbivores = find_all simulation_map.map (Creature Herbivore) in *)
+  (* let predatores = find_all simulation_map.map (Creature Predator) in *)
+  (* let grass = find_all simulation_map.map Grass in *)
+  simulation_map
+
+let rec simulation_cycle simulation_map =
+  render simulation_map;
+  match is_over simulation_map with
+  | true -> ()
+  | false ->
+      let simulation = iterate simulation_map in
+      simulation_cycle simulation
+
+let start simulation_map = simulation_cycle simulation_map
