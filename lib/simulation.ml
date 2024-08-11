@@ -1,4 +1,6 @@
-type creature = Herbivore | Predator
+type herbivore = { health : int; speed : int }
+type predator = { speed : int; attack_rating : int }
+type creature = Herbivore of herbivore | Predator of predator
 type entity = Tree | Grass | Rock | Creature of creature
 type coordinates = { x : int; y : int }
 type density = High | Medium | Low
@@ -22,8 +24,8 @@ let get_entity_sprite entity =
   | Grass -> "🍀"
   | Rock -> "🪨"
   | Tree -> "🌳"
-  | Creature Herbivore -> "🐑"
-  | Creature Predator -> "🐺"
+  | Creature (Herbivore _) -> "🐑"
+  | Creature (Predator _) -> "🐺"
 
 let empty_sprite = "  "
 
@@ -85,39 +87,50 @@ let create_simluation_map ~(map_height : int) ~(map_width : int)
   let area = map_width * map_height in
   let percent value = percent value area in
 
+  let predator = Creature (Predator { speed = 2; attack_rating = 50 }) in
+  let herbivore = Creature (Herbivore { speed = 2; health = 100 }) in
+
   let map =
     match density with
     | High ->
         let map = place map (generate (percent 40) Grass) in
         let map = place map (generate (percent 10) Tree) in
         let map = place map (generate (percent 5) Rock) in
-        let map = place map (generate (percent 3) (Creature Predator)) in
-        place map (generate (percent 5) (Creature Herbivore))
+        let map = place map (generate (percent 3) predator) in
+        place map (generate (percent 5) herbivore)
     | Medium ->
         let map = place map (generate (percent 20) Grass) in
         let map = place map (generate (percent 5) Tree) in
         let map = place map (generate (percent 2) Rock) in
-        let map = place map (generate (percent 2) (Creature Predator)) in
-        place map (generate (percent 4) (Creature Herbivore))
+        let map = place map (generate (percent 2) predator) in
+        place map (generate (percent 4) herbivore)
     | Low ->
         let map = place map (generate (percent 10) Grass) in
         let map = place map (generate (percent 4) Tree) in
         let map = place map (generate (percent 2) Rock) in
-        let map = place map (generate (percent 1) (Creature Predator)) in
-        place map (generate (percent 2) (Creature Herbivore))
+        let map = place map (generate (percent 1) predator) in
+        place map (generate (percent 2) herbivore)
   in
   { map; max_x = map_width; max_y = map_height }
 
-let exists coordinates_entity_map entity =
-  CoordinatesMap.exists (fun _ e -> e = entity) coordinates_entity_map
+let exists coordinates_entity_map predicate =
+  CoordinatesMap.exists (fun _ e -> predicate e) coordinates_entity_map
 
-let find_all coordinates_entity_map entity =
-  CoordinatesMap.filter (fun _ e -> e = entity) coordinates_entity_map
+let find_all coordinates_entity_map predicate =
+  CoordinatesMap.filter (fun _ e -> predicate e) coordinates_entity_map
   |> CoordinatesMap.to_seq |> List.of_seq
 
+let is_herbivore entity =
+  match entity with Creature (Herbivore _) -> true | _ -> false
+
+let is_predator entity =
+  match entity with Creature (Predator _) -> true | _ -> false
+
+let is_grass entity = match entity with Grass -> true | _ -> false
+
 let is_over simulation =
-  (not (exists simulation.map Grass))
-  && not (exists simulation.map (Creature Herbivore))
+  (not (exists simulation.map is_grass))
+  && not (exists simulation.map is_herbivore)
 
 module CoordinatesSet = Set.Make (struct
   type t = coordinates
@@ -200,9 +213,8 @@ let find_path simulation_map coordinates entity =
   find_path_bfs simulation_map q visited predecessors entity
 
 let iterate simulation_map =
-  (* let herbivores = find_all simulation_map.map (Creature Herbivore) in *)
-  (* let predatores = find_all simulation_map.map (Creature Predator) in *)
-  (* let grass = find_all simulation_map.map Grass in *)
+  let herbivores = find_all simulation_map.map is_herbivore in
+  let predators = find_all simulation_map.map is_predator in
   simulation_map
 
 let rec simulation_cycle simulation_map =
