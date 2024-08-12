@@ -3,7 +3,7 @@ type predator = { speed : int; attack_rating : int }
 type creature = Herbivore of herbivore | Predator of predator
 type entity = Tree | Grass | Rock | Creature of creature
 type coordinates = { x : int; y : int }
-type density = High | Medium | Low
+type density = Low | Medium | High
 
 module CoordinatesMap = Map.Make (struct
   type t = coordinates
@@ -31,7 +31,9 @@ let empty_sprite = "  "
 
 let rec render_from_with simulation coordinates (to_render : string) =
   match (coordinates.y, simulation.max_y) with
-  | y, max_y when y >= max_y -> print_string to_render
+  | y, max_y when y >= max_y ->
+      print_string to_render;
+      flush stdout
   | _ -> (
       match (coordinates.x, simulation.max_x) with
       | x, max_x when x >= max_x ->
@@ -130,7 +132,7 @@ let is_grass entity = match entity with Grass -> true | _ -> false
 
 let is_over simulation =
   (not (exists simulation.map is_grass))
-  && not (exists simulation.map is_herbivore)
+  || not (exists simulation.map is_herbivore)
 
 module CoordinatesSet = Set.Make (struct
   type t = coordinates
@@ -179,30 +181,30 @@ let find_neighbours simulation_map coordinates =
 
 let is_visited coordinates visited = CoordinatesSet.mem coordinates visited
 
-let rec find_path_bfs simulation_map q visited predecessors target =
+let rec find_path_bfs simulation_map q visited predecessors target_predicate =
   let not_visited c = not (is_visited c visited) in
   try
     let current_coordinates = Queue.take q in
     let to_predecessor c = (c, current_coordinates) in
     let current_entity = find simulation_map.map current_coordinates in
-    match current_entity with
-    | target when target = current_entity ->
-        reconstruct_path predecessors current_coordinates
-    | _ ->
-        let neighbours = find_neighbours simulation_map current_coordinates in
-        let neighbours = List.filter not_visited neighbours in
-        let neighbours_seq = List.to_seq neighbours in
-        let predecessors =
-          CoordinatesMap.add_seq
-            (List.map to_predecessor neighbours |> List.to_seq)
-            predecessors
-        in
-        let visited = CoordinatesSet.add_seq neighbours_seq visited in
-        Queue.add_seq q neighbours_seq;
-        find_path_bfs simulation_map q visited predecessors target
+
+    if Option.value ~default:false (Option.map target_predicate current_entity)
+    then reconstruct_path predecessors current_coordinates
+    else
+      let neighbours = find_neighbours simulation_map current_coordinates in
+      let neighbours = List.filter not_visited neighbours in
+      let neighbours_seq = List.to_seq neighbours in
+      let predecessors =
+        CoordinatesMap.add_seq
+          (List.map to_predecessor neighbours |> List.to_seq)
+          predecessors
+      in
+      let visited = CoordinatesSet.add_seq neighbours_seq visited in
+      Queue.add_seq q neighbours_seq;
+      find_path_bfs simulation_map q visited predecessors target_predicate
   with Queue.Empty -> []
 
-let find_path simulation_map coordinates entity =
+let find_path simulation_map coordinates target_predicate =
   let q = Queue.create () in
   let visited = CoordinatesSet.empty in
   let predecessors = CoordinatesMap.empty in
@@ -210,19 +212,99 @@ let find_path simulation_map coordinates entity =
   Queue.add coordinates q;
   let visited = CoordinatesSet.add coordinates visited in
 
-  find_path_bfs simulation_map q visited predecessors entity
+  find_path_bfs simulation_map q visited predecessors target_predicate
+
+let move_to target origin simulation_map entity =
+  let map = CoordinatesMap.remove origin simulation_map.map in
+  CoordinatesMap.add target entity map
+
+let last list = List.nth list (List.length list - 1)
+
+let nearest list =
+  if List.length list < 2 then last list
+  else List.nth list (List.length list - 2)
+
+let make_move simulation_map coordinates entity path =
+  try
+    match path with
+    | [] -> simulation_map
+    | _ -> (
+        match entity with
+        | Creature (Herbivore h) ->
+            if h.speed > List.length path then
+              let map =
+                move_to (nearest path) coordinates simulation_map entity
+              in
+              let grass = find map (last path) in
+              match grass with
+              | Some _ ->
+                  let map = CoordinatesMap.remove coordinates map in
+                  { simulation_map with map }
+              | None -> simulation_map
+            else
+              let map =
+                move_to (List.nth path h.speed) coordinates simulation_map
+                  entity
+              in
+              { simulation_map with map }
+        | Creature (Predator p) ->
+            if p.speed > List.length path then
+              let map =
+                move_to (nearest path) coordinates simulation_map entity
+              in
+              let herbivore = find map (last path) in
+              match herbivore with
+              | Some (Creature (Herbivore h)) ->
+                  let herbivore =
+                    { h with health = h.health - p.attack_rating }
+                  in
+                  let map =
+                    CoordinatesMap.add (last path)
+                      (Creature (Herbivore herbivore)) map
+                  in
+                  { simulation_map with map }
+              | Some _ -> simulation_map
+              | None -> simulation_map
+            else
+              let map =
+                move_to (List.nth path p.speed) coordinates simulation_map
+                  entity
+              in
+              { simulation_map with map }
+        | _ -> simulation_map)
+  with Failure _ | Invalid_argument _ -> simulation_map
+
+let rec move_creatures (creatures : (coordinates * entity) list) simulation_map
+    =
+  match creatures with
+  | [] -> simulation_map
+  | (c, e) :: t ->
+      let target_predicate =
+        match e with
+        | Creature (Herbivore _) -> is_grass
+        | Creature (Predator _) -> is_herbivore
+        | _ -> fun _ -> false
+      in
+      let path = find_path simulation_map c target_predicate in
+      let simulation_map = make_move simulation_map c e path in
+      move_creatures t simulation_map
 
 let iterate simulation_map =
   let herbivores = find_all simulation_map.map is_herbivore in
   let predators = find_all simulation_map.map is_predator in
+
+  let simulation_map = move_creatures herbivores simulation_map in
+  let simulation_map = move_creatures predators simulation_map in
+
   simulation_map
 
 let rec simulation_cycle simulation_map =
+  Unix.sleep 1;
   render simulation_map;
   match is_over simulation_map with
-  | true -> ()
+  | true -> exit 0
   | false ->
-      let simulation = iterate simulation_map in
-      simulation_cycle simulation
+      let simulation_map = iterate simulation_map in
+      simulation_cycle simulation_map
 
 let start simulation_map = simulation_cycle simulation_map
